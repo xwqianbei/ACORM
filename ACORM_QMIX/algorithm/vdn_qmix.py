@@ -175,7 +175,7 @@ class VDN_QMIX(object):
             return a_n
 
     def train(self, replay_buffer):
-        batch, max_episode_len = replay_buffer.sample()  # Get training data
+        batch, max_episode_len = replay_buffer.sample(self.batch_size)  # Get training data
         self.train_step += 1
 
         inputs = self.get_inputs(batch, max_episode_len)  # inputs.shape=(bach_size,max_episode_len+1,N,input_dim)

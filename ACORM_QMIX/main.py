@@ -58,6 +58,13 @@ if __name__ == '__main__':
     # save path
     parser.add_argument('--save_path', type=str, default='./result/acorm')
     parser.add_argument('--model_path', type=str, default='./model/acorm')
+    
+    parser.add_argument('--add_agent_id', type=bool, default=False)
+    parser.add_argument('--use_grad_clip', type=bool, default=False)
+    parser.add_argument('--use_rnn', type=bool, default=True)
+    parser.add_argument('--use_double_q', type=bool, default=False)
+    parser.add_argument('--use_RMS', type=bool, default=True)
+    parser.add_argument('--use_gpu', type=bool, default=True)
 
     args = parser.parse_args()
     args.epsilon_decay = (args.epsilon - args.epsilon_min) / args.epsilon_decay_steps

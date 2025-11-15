@@ -3,21 +3,81 @@ import numpy as np
 from algorithm.vdn_qmix import VDN_QMIX
 from algorithm.acorm import ACORM_Agent
 from util.replay_buffer import ReplayBuffer
-from smac.env import StarCraft2Env
+# from smac.env import StarCraft2Env
+from stag_hunt import StagHunt
+from gymma import GymmaWrapper
 import seaborn as sns
 import matplotlib.pyplot as plt
 import datetime
 
+STAG_HUNT_CONFIG = {
+    "map_name": "stag_hunt",
+    "capture_action": True,
+    "n_agents": 8,
+    "n_stags": 8,
+    "n_hare": 0,
+    "miscapture_punishment": 0,
+    "agent_obs": [2, 2],
+    "agent_move_block": [0, 1, 2],
+    "capture_conditions": [0, 1],
+    "capture_action_conditions": [2, 1],
+    "capture_freezes": True,
+    "capture_terminal": False,
+    "directed_observations": False,
+    "directed_cone_narrow": True,
+    "directed_exta_actions": True,
+    "episode_limit": 200,
+    "intersection_global_view": False,
+    "intersection_unknown": False,
+    "mountain_slope": 0.0,
+    "mountain_spawn": False,
+    "mountain_agent_row": -1,
+    "observe_state": False,
+    "observe_walls": False,
+    "observe_ids": False,
+    "observe_one_hot": False,
+    "p_stags_rest": 0.0,
+    "p_hare_rest": 0.0,
+    "prevent_cannibalism": True,
+    "print_caught_prey": False,
+    "print_frozen_agents": False,
+    "random_ghosts": False,
+    "random_ghosts_prob": 0.5,
+    "random_ghosts_mul": -1,
+    "random_ghosts_indicator": False,
+    "remove_frozen": True,
+    "reward_hare": 1,
+    "reward_stag": 10,
+    "reward_collision": 0,
+    "reward_time": 0,
+    "state_as_graph": False,
+    "toroidal": False,
+    "world_shape": [10, 10]
+}
+
+GYMMA_CONFIG = {
+    "key": "lbforaging:Foraging-8x8-2p-3f-v3",
+    "time_limit": 50,
+    "seed": 42,
+    "pretrained_wrapper": None,
+    "common_reward": True,
+    "reward_scalarisation": "sum"
+}
+
+
 class Runner:
     def __init__(self, args):
         self.args = args
+        self.algorithm = self.args.algorithm
         self.env_name = self.args.env_name
         self.seed = self.args.seed
         # Set random seed
         np.random.seed(self.seed)
         torch.manual_seed(self.seed)
         # Create env
-        self.env = StarCraft2Env(map_name=self.env_name, seed=self.seed)
+        # self.env = StarCraft2Env(map_name=self.env_name, seed=self.seed)
+        # self.env = StagHunt(**STAG_HUNT_CONFIG)
+        self.env = GymmaWrapper(**GYMMA_CONFIG)
         self.env_info = self.env.get_env_info()
         self.args.N = self.env_info["n_agents"]  # The number of agents
         self.args.obs_dim = self.env_info["obs_shape"]  # The dimensions of an agent's observation space
@@ -60,30 +120,37 @@ class Runner:
                 evaluate_num += 1
 
             _, _, episode_steps = self.run_episode_smac(evaluate=False)  # Run an episode
-            
-            if self.agent_embed_pretrain_epoch < self.args.agent_embed_pretrain_epochs:
-                if self.replay_buffer.current_size >= self.args.batch_size:
-                    self.agent_embed_pretrain_epoch += 1
-                    agent_embedding_loss = self.agent_n.pretrain_agent_embedding(self.replay_buffer)
-                    self.pretrain_agent_embed_loss.append(agent_embedding_loss.item())
-            else:
-                if self.recl_pretrain_epoch < self.args.recl_pretrain_epochs:
-                    self.recl_pretrain_epoch += 1
-                    recl_loss = self.agent_n.pretrain_recl(self.replay_buffer)
-                    self.pretrain_recl_loss.append(recl_loss.item())
-                    
-                else:                                                          
-                    self.total_steps += episode_steps
+
+            if self.algorithm == 'ACORM':
+                if self.agent_embed_pretrain_epoch < self.args.agent_embed_pretrain_epochs:
                     if self.replay_buffer.current_size >= self.args.batch_size:
-                        self.agent_n.train(self.replay_buffer)  # Training
+                        self.agent_embed_pretrain_epoch += 1
+                        agent_embedding_loss = self.agent_n.pretrain_agent_embedding(self.replay_buffer)
+                        self.pretrain_agent_embed_loss.append(agent_embedding_loss.item())
+                else:
+                    if self.recl_pretrain_epoch < self.args.recl_pretrain_epochs:
+                        self.recl_pretrain_epoch += 1
+                        recl_loss = self.agent_n.pretrain_recl(self.replay_buffer)
+                        self.pretrain_recl_loss.append(recl_loss.item())
+                        
+                    else:                                                          
+                        self.total_steps += episode_steps
+                        if self.replay_buffer.current_size >= self.args.batch_size:
+                            self.agent_n.train(self.replay_buffer)  # Training
+
+            else:
+                self.total_steps += episode_steps
+                if self.replay_buffer.current_size >= self.args.batch_size:
+                    self.agent_n.train(self.replay_buffer)
                     
         self.evaluate_policy()
          # save model
         model_path = f'{self.model_path}/{self.env_name}_seed{self.seed}_'
         torch.save(self.agent_n.eval_Q_net, model_path + 'q_net.pth')
-        torch.save(self.agent_n.RECL.role_embedding_net, model_path + 'role_net.pth')
-        torch.save(self.agent_n.RECL.agent_embedding_net, model_path+'agent_embed_net.pth')
-        torch.save(self.agent_n.eval_mix_net.attention_net, model_path+'attention_net.pth')
+        if self.algorithm == "ACORM":
+            torch.save(self.agent_n.RECL.role_embedding_net, model_path + 'role_net.pth')
+            torch.save(self.agent_n.RECL.agent_embedding_net, model_path+'agent_embed_net.pth')
+            torch.save(self.agent_n.eval_mix_net.attention_net, model_path+'attention_net.pth')
         torch.save(self.agent_n.eval_mix_net, model_path+'mix_net.pth')
         self.env.close()
 
@@ -119,6 +186,62 @@ class Runner:
             np.save(f'{self.save_path}/{self.env_name}_seed{self.seed}.npy', np.array(self.win_rates))
             np.save(f'{self.save_path}/{self.env_name}_seed{self.seed}_return.npy', np.array(self.evaluate_reward))
         
+    def run_episode_stag_hunt(self, evaluate=False):
+        win_tag = False
+        episode_reward = 0
+        self.env.reset()
+        
+        self.agent_n.eval_Q_net.rnn_hidden = None
+        if self.args.algorithm == 'ACORM':
+            self.agent_n.RECL.agent_embedding_net.rnn_hidden = None
+
+        last_onehot_a_n = np.zeros((self.args.N, self.args.action_dim))  # Last actions of N agents(one-hot)
+        for episode_step in range(self.args.episode_limit):
+            obs_n = self.env.get_obs()  # obs_n.shape=(N,obs_dim)
+            s = self.env.get_state()  # s.shape=(state_dim,)
+            avail_a_n = self.env.get_avail_actions()  # Get available actions of N agents, avail_a_n.shape=(N,action_dim)
+            epsilon = 0 if evaluate else self.epsilon
+            
+            if self.args.algorithm == 'ACORM':
+                role_embedding = self.agent_n.get_role_embedding(obs_n, last_onehot_a_n)
+                a_n = self.agent_n.choose_action(obs_n, last_onehot_a_n, role_embedding, avail_a_n, epsilon)
+            else:
+                a_n = self.agent_n.choose_action(obs_n, last_onehot_a_n, avail_a_n, epsilon)
+
+            r, done, info = self.env.step(a_n)  # Take a step
+            win_tag = True if done and 'battle_won' in info and info['battle_won'] else False
+            episode_reward += r
+
+            if not evaluate:
+                """"
+                    When dead or win or reaching the episode_limit, done will be Ture, we need to distinguish them;
+                    dw means dead or win,there is no next state s';
+                    but when reaching the max_episode_steps,there is a next state s' actually.
+                """
+                if done and episode_step + 1 != self.args.episode_limit:
+                    dw = True
+                else:
+                    dw = False
+
+                # Store the transition
+                self.replay_buffer.store_transition(episode_step, obs_n, s, avail_a_n, last_onehot_a_n, a_n, r, dw)
+                last_onehot_a_n = np.eye(self.args.action_dim)[a_n]  # Convert actions to one-hot vectors
+                # obs_a_n_buffer[episode_step] = obs_n
+                # Decay the epsilon
+                self.epsilon = self.epsilon - self.args.epsilon_decay if self.epsilon - self.args.epsilon_decay > self.args.epsilon_min else self.args.epsilon_min
+
+            if done:
+                break
+
+        if not evaluate:
+            # An episode is over, store obs_n, s and avail_a_n in the last step
+            obs_n = self.env.get_obs()
+            s = self.env.get_state()
+            avail_a_n = self.env.get_avail_actions()
+            self.replay_buffer.store_last_step(episode_step + 1, obs_n, s, avail_a_n, last_onehot_a_n)
+        return win_tag, episode_reward, episode_step+1
+        
+
     def run_episode_smac(self, evaluate=False):
         win_tag = False
         episode_reward = 0

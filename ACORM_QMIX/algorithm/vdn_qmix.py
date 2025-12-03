@@ -179,6 +179,9 @@ class VDN_QMIX(object):
         self.train_step += 1
 
         inputs = self.get_inputs(batch, max_episode_len)  # inputs.shape=(bach_size,max_episode_len+1,N,input_dim)
+        with open('state_record.txt', 'a') as f:
+            f.write(str(batch['s'][0].tolist()) + '\n\n')
+
         if self.use_gpu:
             inputs = inputs.to(self.device)
             batch_s = batch['s'].to(self.device)
